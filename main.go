@@ -10,6 +10,8 @@ import (
 	"os"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/host"
+	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel/exporters/metric/prometheus"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/global"
@@ -31,8 +33,6 @@ func initMeter() {
 
 	fmt.Println("Prometheus server running on :2222")
 }
-
-const closedConnectionErrString = "use of closed network connection"
 
 func duplexStream(
 	source io.ReadWriter,
@@ -94,6 +94,15 @@ func main() {
 	}
 
 	initMeter()
+	if err := host.Start(); err != nil {
+		panic(err)
+	}
+	if err := runtime.Start(
+		runtime.WithMinimumReadMemStatsInterval(time.Second),
+	); err != nil {
+		panic(err)
+	}
+
 	meter := global.Meter("my_application")
 	requestBytes, err := meter.NewInt64Counter("request.bytes", metric.WithUnit(unit.Bytes))
 	if err != nil {
@@ -130,10 +139,9 @@ func main() {
 			break
 		}
 
-
 		_, _ = duplexStream(
 			&ReadWriteNotifier{
-				readWriter:  clientConn,
+				readWriter: clientConn,
 				onWrite: func(n int, duration time.Duration) {
 					requestBytes.Add(ctx, int64(n))
 					requestLatency.Record(ctx, duration.Milliseconds())
@@ -144,7 +152,7 @@ func main() {
 					//requestLatency.Record(ctx, duration.Milliseconds())
 				},
 			}, &ReadWriteNotifier{
-				readWriter:  targetConn,
+				readWriter: targetConn,
 				onWrite: func(n int, duration time.Duration) {
 					requestBytes.Add(ctx, int64(n))
 					requestLatency.Record(ctx, duration.Microseconds())
